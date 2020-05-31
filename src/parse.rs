@@ -2250,6 +2250,7 @@ impl<'a> Parser<'a> {
                                             self.link_stack.disable_all_links();
                                         }
                                     } else {
+                                        saw_invalid_reference = true;
                                         self.tree[cur_ix].item.body = ItemBody::Text;
                                     }
                                 }
@@ -3129,5 +3130,20 @@ mod test {
             }
         }
         assert_eq!(found, 1);
+    }
+
+    #[test]
+    fn broken_links_called_only_once() {
+        use std::cell::Cell;
+
+        let markdown = "See also [`g()`][crate::g].";
+        let times_called = Cell::new(0);
+        let callback = |_: &str, _: &str| {
+            times_called.set(times_called.get() + 1);
+            None
+        };
+        let parser = Parser::new_with_broken_link_callback(markdown, Options::empty(), Some(&callback));
+        for _ in parser {}
+        assert_eq!(times_called.get(), 1);
     }
 }
