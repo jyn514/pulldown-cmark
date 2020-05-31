@@ -1994,6 +1994,7 @@ impl<'a> Parser<'a> {
 
         let block_end = self.tree[self.tree.peek_up().unwrap()].item.end;
         let block_text = &self.text[..block_end];
+        let mut saw_invalid_reference = false;
 
         while let TreePointer::Valid(mut cur_ix) = cur {
             match self.tree[cur_ix].item.body {
@@ -2184,68 +2185,73 @@ impl<'a> Parser<'a> {
                                 self.link_stack.clear();
                                 continue;
                             } else if let Some((ReferenceLabel::Link(link_label), end)) = label {
-                                let type_url_title = self
-                                    .allocs
-                                    .refdefs
-                                    .get(&UniCase::new(link_label.as_ref().into()))
-                                    .map(|matching_def| {
-                                        // found a matching definition!
-                                        let title = matching_def
-                                            .title
-                                            .as_ref()
-                                            .cloned()
-                                            .unwrap_or_else(|| "".into());
-                                        let url = matching_def.dest.clone();
-                                        (link_type, url, title)
-                                    })
-                                    .or_else(|| {
-                                        self.broken_link_callback
-                                            .and_then(|callback| {
-                                                // looked for matching definition, but didn't find it. try to fix
-                                                // link with callback, if it is defined
-                                                callback(link_label.as_ref(), link_label.as_ref())
-                                            })
-                                            .map(|(url, title)| {
-                                                (link_type.to_unknown(), url.into(), title.into())
-                                            })
-                                    });
-
-                                if let Some((def_link_type, url, title)) = type_url_title {
-                                    let link_ix =
-                                        self.allocs.allocate_link(def_link_type, url, title);
-                                    self.tree[tos.node].item.body = if tos.ty == LinkStackTy::Image
-                                    {
-                                        ItemBody::Image(link_ix)
-                                    } else {
-                                        ItemBody::Link(link_ix)
-                                    };
-                                    let label_node = self.tree[tos.node].next;
-
-                                    // lets do some tree surgery to add the link to the tree
-                                    // 1st: skip the label node and close node
-                                    self.tree[tos.node].next = node_after_link;
-
-                                    // then, if it exists, add the label node as a child to the link node
-                                    if label_node != cur {
-                                        self.tree[tos.node].child = label_node;
-
-                                        // finally: disconnect list of children
-                                        if let TreePointer::Valid(prev_ix) = prev {
-                                            self.tree[prev_ix].next = TreePointer::Nil;
-                                        }
-                                    }
-
-                                    self.tree[tos.node].item.end = end;
-
-                                    // set up cur so next node will be node_after_link
-                                    cur = TreePointer::Valid(tos.node);
-                                    cur_ix = tos.node;
-
-                                    if tos.ty == LinkStackTy::Link {
-                                        self.link_stack.disable_all_links();
-                                    }
-                                } else {
+                                if saw_invalid_reference {
+                                    saw_invalid_reference = false;
                                     self.tree[cur_ix].item.body = ItemBody::Text;
+                                } else {
+                                    let type_url_title = self
+                                        .allocs
+                                        .refdefs
+                                        .get(&UniCase::new(link_label.as_ref().into()))
+                                        .map(|matching_def| {
+                                            // found a matching definition!
+                                            let title = matching_def
+                                                .title
+                                                .as_ref()
+                                                .cloned()
+                                                .unwrap_or_else(|| "".into());
+                                            let url = matching_def.dest.clone();
+                                            (link_type, url, title)
+                                        })
+                                        .or_else(|| {
+                                            self.broken_link_callback
+                                                .and_then(|callback| {
+                                                    // looked for matching definition, but didn't find it. try to fix
+                                                    // link with callback, if it is defined
+                                                    callback(link_label.as_ref(), link_label.as_ref())
+                                                })
+                                                .map(|(url, title)| {
+                                                    (link_type.to_unknown(), url.into(), title.into())
+                                                })
+                                        });
+
+                                    if let Some((def_link_type, url, title)) = type_url_title {
+                                        let link_ix =
+                                            self.allocs.allocate_link(def_link_type, url, title);
+                                        self.tree[tos.node].item.body = if tos.ty == LinkStackTy::Image
+                                        {
+                                            ItemBody::Image(link_ix)
+                                        } else {
+                                            ItemBody::Link(link_ix)
+                                        };
+                                        let label_node = self.tree[tos.node].next;
+
+                                        // lets do some tree surgery to add the link to the tree
+                                        // 1st: skip the label node and close node
+                                        self.tree[tos.node].next = node_after_link;
+
+                                        // then, if it exists, add the label node as a child to the link node
+                                        if label_node != cur {
+                                            self.tree[tos.node].child = label_node;
+
+                                            // finally: disconnect list of children
+                                            if let TreePointer::Valid(prev_ix) = prev {
+                                                self.tree[prev_ix].next = TreePointer::Nil;
+                                            }
+                                        }
+
+                                        self.tree[tos.node].item.end = end;
+
+                                        // set up cur so next node will be node_after_link
+                                        cur = TreePointer::Valid(tos.node);
+                                        cur_ix = tos.node;
+
+                                        if tos.ty == LinkStackTy::Link {
+                                            self.link_stack.disable_all_links();
+                                        }
+                                    } else {
+                                        self.tree[cur_ix].item.body = ItemBody::Text;
+                                    }
                                 }
                             } else {
                                 self.tree[cur_ix].item.body = ItemBody::Text;
